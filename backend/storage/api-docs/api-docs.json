@@ -1,0 +1,270 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+        "title": "Laravel 电商 Demo API",
+        "description": "Laravel 10 + Redis 秒杀 Demo。统一返回 {code, message, data}，code=0 表示成功。",
+        "version": "1.0.0"
+    },
+    "servers": [
+        {
+            "url": "http://127.0.0.1:8000",
+            "description": "本地开发环境"
+        }
+    ],
+    "paths": {
+        "/api/auth/login": {
+            "post": {
+                "tags": [
+                    "认证"
+                ],
+                "summary": "手机号 + 密码登录",
+                "operationId": "dd51a484b7fa0f97c7680fdbde14cf5f",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "phone",
+                                    "password"
+                                ],
+                                "properties": {
+                                    "phone": {
+                                        "type": "string",
+                                        "example": "13800138000"
+                                    },
+                                    "password": {
+                                        "type": "string",
+                                        "example": "123456"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "code=0 成功，data.token 为 Bearer Token"
+                    }
+                }
+            }
+        },
+        "/api/goods": {
+            "get": {
+                "tags": [
+                    "商品"
+                ],
+                "summary": "商品列表（含进行中的秒杀标签）",
+                "operationId": "a497411e786cab0c47eb1c0ca7b20b8b",
+                "responses": {
+                    "200": {
+                        "description": "商品数组"
+                    }
+                }
+            }
+        },
+        "/api/goods/{id}": {
+            "get": {
+                "tags": [
+                    "商品"
+                ],
+                "summary": "商品详情（缓存穿透/击穿/雪崩处理示例）",
+                "operationId": "406f4d778acd9c698f1e25746c769d45",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "goods + seckill"
+                    }
+                }
+            }
+        },
+        "/api/orders": {
+            "post": {
+                "tags": [
+                    "订单"
+                ],
+                "summary": "购物车下单（幂等）",
+                "description": "必须携带 X-Request-Id（或 body.request_id），同一个 token 重复提交只会产生一个订单",
+                "operationId": "2123ba58dadb22bd6f2c8081af562230",
+                "parameters": [
+                    {
+                        "name": "X-Request-Id",
+                        "in": "header",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "cart_ids": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        },
+                                        "example": [
+                                            1,
+                                            2
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "订单详情"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/orders/{orderNo}/pay": {
+            "post": {
+                "tags": [
+                    "订单"
+                ],
+                "summary": "模拟支付（幂等：已支付直接返回成功）",
+                "operationId": "44ffd89bd44d85f4789e78ffb5bbef3f",
+                "parameters": [
+                    {
+                        "name": "orderNo",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "订单详情"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/payments/callback": {
+            "post": {
+                "tags": [
+                    "支付"
+                ],
+                "summary": "模拟支付回调（幂等）",
+                "description": "已支付订单重复回调直接返回成功，不会重复扣减/回补库存；状态用条件更新保证只能 0->1。",
+                "operationId": "0b732d8a5ed20f67b03a5e8b20267c0d",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "order_no"
+                                ],
+                                "properties": {
+                                    "order_no": {
+                                        "type": "string",
+                                        "example": "SO20261111120000123456"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "code=0 处理成功（含重复回调）"
+                    }
+                }
+            }
+        },
+        "/api/seckill/{id}/buy": {
+            "post": {
+                "tags": [
+                    "秒杀"
+                ],
+                "summary": "秒杀抢购",
+                "description": "链路：令牌桶限流 -> Redis Lua 原子预扣(库存+一人一单) -> MySQL 条件更新兜底 -> 生成待支付订单。售罄/重复购买直接返回，不查数据库。",
+                "operationId": "38085fa11d09a68fb166028443d832c4",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "code=0 抢购成功；3003 售罄；3004 重复购买；3005 限流"
+                    },
+                    "429": {
+                        "description": "令牌桶限流"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        }
+    },
+    "components": {
+        "securitySchemes": {
+            "bearerAuth": {
+                "type": "http",
+                "description": "登录接口返回的 token，放在 Authorization: Bearer {token}",
+                "scheme": "bearer"
+            }
+        }
+    },
+    "tags": [
+        {
+            "name": "认证",
+            "description": "认证"
+        },
+        {
+            "name": "商品",
+            "description": "商品"
+        },
+        {
+            "name": "订单",
+            "description": "订单"
+        },
+        {
+            "name": "支付",
+            "description": "支付"
+        },
+        {
+            "name": "秒杀",
+            "description": "秒杀"
+        }
+    ]
+}
